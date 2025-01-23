@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Medical Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.5.0/axios.min.js"></script>
+</head>
+
+<body class="bg-gray-100">
+  <div class="container mx-auto p-4 space-y-6">
+    <h1 class="text-3xl font-bold">Patient Vitals Monitor</h1>
+
+    <!-- Critical Alerts -->
+    <div id="alerts" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded">
+      <div class="flex items-center">
+        <div class="ml-3">
+          <h3 class="text-red-800 font-medium">Patients Last Monitored Average Value</h3>
+          <div id="alertsList" class="mt-2 text-red-700"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Current Vitals -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-gray-500 text-sm font-medium">Heart Rate</h3>
+        <div id="currentHR" class="mt-2 text-3xl font-bold"></div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-gray-500 text-sm font-medium">SpO2</h3>
+        <div id="currentSpO2" class="mt-2 text-3xl font-bold"></div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-gray-500 text-sm font-medium">Blood Pressure</h3>
+        <div id="currentBP" class="mt-2 text-3xl font-bold"></div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-gray-500 text-sm font-medium">Ambulatory Pressure</h3>
+        <div id="currentAP" class="mt-2 text-3xl font-bold"></div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-gray-500 text-sm font-medium">Temperature</h3>
+        <div id="currentTemp" class="mt-2 text-3xl font-bold"></div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-gray-500 text-sm font-medium">Cardiovascular Mean Pressure</h3>
+        <div id="currentCVPm" class="mt-2 text-3xl font-bold"></div>
+      </div>
+    </div>
+
+    <!-- Trends Chart -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <h2 class="text-xl font-semibold mb-4">Blood Pressure (NIBP)</h2>
+      <div id="NIBPChart" class="w-full h-96 h-2-scrollbar"></div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6">
+      <h2 class="text-xl font-semibold mb-4">Ambulatory Pressure</h2>
+      <div id="APChart" class="w-full h-96 h-2-scrollbar"></div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6">
+      <h2 class="text-xl font-semibold mb-4">Oxygen Saturation</h2>
+      <div id="SpO2Chart" class="w-full h-96 h-2-scrollbar"></div>
+    </div>
+    
+    <div class="bg-white rounded-lg shadow p-6">
+      <h2 class="text-xl font-semibold mb-4">Heart Rate Electrocardiogram</h2>
+      <div id="HREChart" class="w-full h-96 h-2-scrollbar"></div>
+    </div>
+
+    <!-- Readings Table -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-200">
+        <h2 class="text-xl font-semibold">Latest Readings</h2>
+      </div>
+      <div class="overflow-x-auto max-h-[1000px] overflow-y-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+            </tr>
+          </thead>
+          <tbody id="readingsTableBody" class="bg-white divide-y divide-gray-200"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      let globalData = [];
+
+      async function fetchData() {
+        // try {
+        //   const response = await fetch('medical_data.json');
+        //   if (!response.ok) {
+        //     throw new Error('Network response was not ok');
+        //   }
+        //   const data = await response.json();
+        //   const data2 = data.parents;
+        //   globalData = data2;
+        //   console.log("globalData");
+        //   console.log(globalData);
+        //   updateDashboard(data2);
+        // } catch (error) {
+        //   console.error('Error fetching data:', error);
+        // }
+        try {
+            const response = await axios.get("http://103.121.12.92:9051/data", {
+                headers: { "Content-Type": "application/xml; charset=utf-8" }
+            });
+
+            const xmlString = response.data.response;
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+
+            const base64Data = xmlDoc.querySelector('data[conceptID="data"]').textContent;
+            const jsonData = JSON.parse(atob(base64Data));
+
+            // Assuming you have a function to update your UI or state
+            // setData(jsonData);
+
+            // console.log('Decoded JSON:', jsonData);
+            updateDashboard(jsonData);
+        } catch (error) {
+            console.error('Error:', error);
+        }
+      }
+
+      function updateDashboard(data) {
+        data2 = Object.values(data).sort((a, b) => new Date(b.time) - new Date(a.time))
+        updateCurrentVitals(data);
+        updateAlerts(data);
+        updateReadingsTable(data);
+        createTrendsChart(data.filter(item => item.Name === "NIBP Systolic" || item.Name === "NIBP Diastolic"), 'NIBPChart', "NIBP Systolic", "NIBP Diastolic");
+        createTrendsChart(data.filter(item => item.Name === "APS" || item.Name === "APD"), 'APChart', "APS", "APD");
+        createTrendsChartSingleValue(data.filter(item => item.Name === "HR ECG"), 'HREChart',"HR ECG");
+        createTrendsChartSingleValue(data.filter(item => item.Name === "SpO2 %"), 'SpO2Chart',"SpO2 %");
+      }
+
+      function updateCurrentVitals(data) {
+        console.log("hi")
+        console.log(data)
+        const latestReadings = {};
+        data.forEach(reading => {
+          if (reading.Value) {
+            latestReadings[reading.Name] = reading.Value;
+          }
+        });
+
+        document.getElementById('currentHR').textContent = `${latestReadings['HR ECG'] || '-'} bpm`;
+        document.getElementById('currentSpO2').textContent = `${latestReadings['SpO2 %'] || '-'}%`;
+        document.getElementById('currentBP').textContent = `${latestReadings['NIBP Systolic'] || '-'}/${latestReadings['NIBP Diastolic'] || '-'}`;
+        document.getElementById('currentAP').textContent = `${latestReadings['APS'] || '-'}/${latestReadings['APD'] || '-'}`;
+        document.getElementById('currentTemp').textContent = `${latestReadings['T1'] || '-'}°C`;
+        document.getElementById('currentCVPm').textContent = `${latestReadings['CVPm'] || '-'}`;
+      }
+
+      function calculateAverages(data) {
+        const averages = {};
+
+        data.forEach(item => {
+          const name = item.Name;
+          const value = parseFloat(item.Value);
+
+          // Only process valid numbers for Value
+          if (!isNaN(value) && item.Value !== "") {
+            // Initialize the entry for the name if it doesn't exist
+            if (!averages[name]) {
+              averages[name] = { sum: 0, count: 0, minRange: item.MinRange, maxRange: item.MaxRange };
+            }
+
+            // Accumulate sum and count
+            averages[name].sum += value;
+            averages[name].count += 1;
+          }
+        });
+
+        // Create a result array with Name and the average value
+        const result = [];
+        for (const name in averages) {
+          if (averages.hasOwnProperty(name)) {
+            const { sum, count, minRange, maxRange } = averages[name];
+            const average = (sum / count).toFixed(2);
+            result.push({ name: name, averageValue: average, minRange: minRange, maxRange: maxRange });
+          }
+        }
+
+        return result;
+      }
+
+
+      function updateAlerts(data) {
+        const alerts = data.filter(reading => reading.IsHighLimit || reading.IsLowLimit);
+        const alertsContainer = document.getElementById('alerts');
+        const alertsList = document.getElementById('alertsList');
+        const allUniqueData = calculateAverages(data);
+
+        if (alerts.length > 0) {
+          alertsContainer.classList.remove('hidden');
+          alertsList.innerHTML = allUniqueData
+            .filter(alertData => !alertData.name.startsWith('GCS')) // Exclude "GCS" parameters
+            .map(alertData => `
+            <div class="flex items-center space-x-2">
+                <span class="font-medium">${alertData.name}:</span>
+                <span>${alertData.averageValue}</span>
+                <span class="text-red-600">
+                    ${alertData.averageValue > alertData.maxRange ? 'HIGH' :
+                alertData.averageValue < alertData.minRange ? 'LOW' : ''}
+                </span>
+            </div>
+        `).join('');
+        } else {
+          alertsContainer.classList.add('hidden');
+        }
+      }
+
+      function createTrendsChart(data, idName, systolic, diastolic) {
+        const chartContainer = document.getElementById(idName);
+        chartContainer.innerHTML = '';
+
+        const margin = { top: 20, right: 120, bottom: 80, left: 50 };
+        const width = chartContainer.clientWidth - margin.left - margin.right;
+        const height = chartContainer.clientHeight - margin.top - margin.bottom;
+
+        // Create outer container with scrolling
+        const scrollContainer = d3.select(`#${idName}`)
+          .append('div')
+          .style('overflow-x', 'auto')
+          .style('margin-bottom', '20px');
+
+        const svg = scrollContainer
+          .append('svg')
+          .attr('width', width + margin.left + margin.right)
+          .attr('height', height + margin.top + margin.bottom)
+          .append('g')
+          .attr('transform', `translate(${margin.left},${margin.top})`);
+
+        // Process data
+        const bpData = data.reduce((acc, item) => {
+          const time = item.ColumnDisplay;
+          if (!acc[time]) {
+            acc[time] = { time };
+          }
+          if (item.Name === systolic) {
+            acc[time].systolic = parseFloat(item.Value);
+          }
+          if (item.Name === diastolic) {
+            acc[time].diastolic = parseFloat(item.Value);
+          }
+          return acc;
+        }, {});
+
+        const processedData = Object.values(bpData)
+          .filter(d => d.systolic || d.diastolic)
+          .sort((a, b) => new Date(b.time) - new Date(a.time));
+
+        // Calculate minimum width needed for 50px gaps
+        const minWidth = Math.max(width, processedData.length * 50);
+
+        // Set up scales
+        const x = d3.scalePoint()
+          .domain(processedData.map(d => d.time))
+          .range([0, minWidth])
+          .padding(0.5);
+
+        const y = d3.scaleLinear()
+          .domain([0, d3.max(processedData, d => Math.max(d.systolic || 0, d.diastolic || 0)) * 1.1])
+          .range([height, 0]);
+
+        // Update SVG width
+        scrollContainer.select('svg')
+          .attr('width', minWidth + margin.left + margin.right);
+
+        // Add axes
+        svg.append('g')
+          .attr('transform', `translate(0,${height})`)
+          .call(d3.axisBottom(x))
+          .selectAll('text')
+          .style('text-anchor', 'end')
+          .attr('dx', '-.8em')
+          .attr('dy', '.15em')
+          .attr('transform', 'rotate(-45)');
+
+        svg.append('g')
+          .call(d3.axisLeft(y));
+
+        // Create lines
+        const lineSystolic = d3.line()
+          .x(d => x(d.time))
+          .y(d => y(d.systolic))
+          .defined(d => d.systolic != null);
+
+        const lineDiastolic = d3.line()
+          .x(d => x(d.time))
+          .y(d => y(d.diastolic))
+          .defined(d => d.diastolic != null);
+
+        // Add lines
+        svg.append('path')
+          .datum(processedData)
+          .attr('fill', 'none')
+          .attr('stroke', '#ef4444')
+          .attr('stroke-width', 2)
+          .attr('d', lineSystolic);
+
+        svg.append('path')
+          .datum(processedData)
+          .attr('fill', 'none')
+          .attr('stroke', '#3b82f6')
+          .attr('stroke-width', 2)
+          .attr('d', lineDiastolic);
+
+        // Create tooltip
+        const tooltip = d3.select('body').append('div')
+          .attr('class', 'tooltip')
+          .style('position', 'absolute')
+          .style('background', 'white')
+          .style('padding', '10px')
+          .style('border', '1px solid #ccc')
+          .style('border-radius', '5px')
+          .style('pointer-events', 'none')
+          .style('opacity', 0)
+          .style('z-index', 1000);
+
+        // Add interactive dots
+        svg.selectAll('.dot-systolic')
+          .data(processedData.filter(d => d.systolic != null))
+          .enter()
+          .append('circle')
+          .attr('class', 'dot-systolic')
+          .attr('cx', d => x(d.time))
+          .attr('cy', d => y(d.systolic))
+          .attr('r', 6)
+          .attr('fill', '#ef4444')
+          .on('mouseover', function (event, d) {
+            d3.select(this).attr('r', 8);
+            tooltip.transition()
+              .duration(200)
+              .style('opacity', .9);
+            tooltip.html(`Time: ${d.time}<br/>Systolic: ${d.systolic}`)
+              .style('left', (event.pageX + 10) + 'px')
+              .style('top', (event.pageY - 28) + 'px');
+          })
+          .on('mouseout', function () {
+            d3.select(this).attr('r', 6);
+            tooltip.transition()
+              .duration(500)
+              .style('opacity', 0);
+          });
+
+        svg.selectAll('.dot-diastolic')
+          .data(processedData.filter(d => d.diastolic != null))
+          .enter()
+          .append('circle')
+          .attr('class', 'dot-diastolic')
+          .attr('cx', d => x(d.time))
+          .attr('cy', d => y(d.diastolic))
+          .attr('r', 6)
+          .attr('fill', '#3b82f6')
+          .on('mouseover', function (event, d) {
+            d3.select(this).attr('r', 8);
+            tooltip.transition()
+              .duration(200)
+              .style('opacity', .9);
+            tooltip.html(`Time: ${d.time}<br/>Diastolic: ${d.diastolic}`)
+              .style('left', (event.pageX + 10) + 'px')
+              .style('top', (event.pageY - 28) + 'px');
+          })
+          .on('mouseout', function () {
+            d3.select(this).attr('r', 6);
+            tooltip.transition()
+              .duration(500)
+              .style('opacity', 0);
+          });
+
+        // Add legend
+        const legend = svg.append('g')
+          .attr('font-family', 'sans-serif')
+          .attr('font-size', 10)
+          .attr('text-anchor', 'start')
+          .selectAll('g')
+          .data([systolic, diastolic])
+          .enter()
+          .append('g')
+          .attr('transform', (d, i) => `translate(${width + 10},${i * 20 - 10})`);
+
+        legend.append('rect')
+          .attr('x', 0)
+          .attr('width', 15)
+          .attr('height', 15)
+          .attr('fill', (d, i) => i === 0 ? '#ef4444' : '#3b82f6');
+
+        legend.append('text')
+          .attr('x', 20)
+          .attr('y', 7.5)
+          .attr('dy', '0.32em')
+          .text(d => d);
+      }
+
+
+      function createTrendsChartSingleValue(data, idName, valueType) {
+        const chartContainer = document.getElementById(idName);
+        chartContainer.innerHTML = '';
+
+        const margin = { top: 20, right: 120, bottom: 80, left: 50 };
+        const width = chartContainer.clientWidth - margin.left - margin.right;
+        const height = chartContainer.clientHeight - margin.top - margin.bottom;
+
+        // Create outer container with scrolling
+        const scrollContainer = d3.select(`#${idName}`)
+          .append('div')
+          .style('overflow-x', 'auto')
+          .style('margin-bottom', '20px');
+
+        const svg = scrollContainer
+          .append('svg')
+          .attr('width', width + margin.left + margin.right)
+          .attr('height', height + margin.top + margin.bottom)
+          .append('g')
+          .attr('transform', `translate(${margin.left},${margin.top})`);
+
+        // Process data
+        const bpData = data.reduce((acc, item) => {
+          const time = item.ColumnDisplay;
+          if (!acc[time]) {
+            acc[time] = { time };
+          }
+          if (item.Name === valueType) {
+            acc[time][valueType] = parseFloat(item.Value);
+          }
+          return acc;
+        }, {});
+
+        const processedData = Object.values(bpData)
+          .filter(d => d[valueType])
+          .sort((a, b) => new Date(b.time) - new Date(a.time));
+
+        // Calculate minimum width needed for 50px gaps
+        const minWidth = Math.max(width, processedData.length * 50);
+
+        // Set up scales
+        const x = d3.scalePoint()
+          .domain(processedData.map(d => d.time))
+          .range([0, minWidth])
+          .padding(0.5);
+
+        const y = d3.scaleLinear()
+          .domain([0, d3.max(processedData, d => d[valueType]) * 1.1])
+          .range([height, 0]);
+
+        // Update SVG width
+        scrollContainer.select('svg')
+          .attr('width', minWidth + margin.left + margin.right);
+
+        // Add axes
+        svg.append('g')
+          .attr('transform', `translate(0,${height})`)
+          .call(d3.axisBottom(x))
+          .selectAll('text')
+          .style('text-anchor', 'end')
+          .attr('dx', '-.8em')
+          .attr('dy', '.15em')
+          .attr('transform', 'rotate(-45)');
+
+        svg.append('g')
+          .call(d3.axisLeft(y));
+
+        // Create line
+        const line = d3.line()
+          .x(d => x(d.time))
+          .y(d => y(d[valueType]))
+          .defined(d => d[valueType] != null);
+
+        // Add line
+        svg.append('path')
+          .datum(processedData)
+          .attr('fill', 'none')
+          .attr('stroke', '#ef4444')  // Use a single color for the line
+          .attr('stroke-width', 2)
+          .attr('d', line);
+
+        // Create tooltip
+        const tooltip = d3.select('body').append('div')
+          .attr('class', 'tooltip')
+          .style('position', 'absolute')
+          .style('background', 'white')
+          .style('padding', '10px')
+          .style('border', '1px solid #ccc')
+          .style('border-radius', '5px')
+          .style('pointer-events', 'none')
+          .style('opacity', 0)
+          .style('z-index', 1000);
+
+        // Add interactive dots
+        svg.selectAll('.dot')
+          .data(processedData)
+          .enter()
+          .append('circle')
+          .attr('class', 'dot')
+          .attr('cx', d => x(d.time))
+          .attr('cy', d => y(d[valueType]))
+          .attr('r', 6)
+          .attr('fill', '#ef4444')
+          .on('mouseover', function (event, d) {
+            d3.select(this).attr('r', 8);
+            tooltip.transition()
+              .duration(200)
+              .style('opacity', .9);
+            tooltip.html(`Time: ${d.time}<br/>${valueType}: ${d[valueType]}`)
+              .style('left', (event.pageX + 10) + 'px')
+              .style('top', (event.pageY - 28) + 'px');
+          })
+          .on('mouseout', function () {
+            d3.select(this).attr('r', 6);
+            tooltip.transition()
+              .duration(500)
+              .style('opacity', 0);
+          });
+
+        // Add legend
+        const legend = svg.append('g')
+          .attr('font-family', 'sans-serif')
+          .attr('font-size', 10)
+          .attr('text-anchor', 'start')
+          .selectAll('g')
+          .data([valueType])
+          .enter()
+          .append('g')
+          .attr('transform', `translate(${width + 10},10)`);
+
+        legend.append('rect')
+          .attr('x', 0)
+          .attr('width', 15)
+          .attr('height', 15)
+          .attr('fill', '#ef4444'); // Use the same color as the line
+
+        legend.append('text')
+          .attr('x', 20)
+          .attr('y', 7.5)
+          .attr('dy', '0.32em')
+          .text(d => d);
+      }
+
+
+
+
+      function updateReadingsTable(data) {
+        const tableBody = document.getElementById('readingsTableBody');
+        const sortedData = [...data].sort((a, b) =>
+          new Date(b.PeriodStart) - new Date(a.PeriodStart)
+        );
+
+        tableBody.innerHTML = sortedData
+          .filter(reading => reading.Value)
+          .map(reading => `
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                ${reading.ColumnDisplay}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                ${reading.Name}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                ${reading.Value}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                ${getStatusBadge(reading)}
+                            </td>
+                        </tr>
+                    `).join('');
+      }
+
+      function getStatusBadge(reading) {
+        if (reading.IsHighLimit) {
+          return '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">HIGH</span>';
+        } else if (reading.IsLowLimit) {
+          return '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">LOW</span>';
+        } else {
+          return '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Normal</span>';
+        }
+      }
+
+      // Initial load
+      fetchData();
+
+      // Refresh every 30 seconds
+      setInterval(fetchData, 30000);
+
+      // Handle window resize
+      window.addEventListener('resize', _.debounce(() => {
+        if (globalData.length > 0) {
+          createTrendsChart(globalData);
+        }
+      }, 250));
+    });
+  </script>
+</body>
+
+</html>
